@@ -2,8 +2,21 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VOID-20 Equalizer</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap">
+<link rel="preload" href="fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="description" content="VOID-20: 20-band equalizer, custom bands, ultra deep bass, speaker guard and APEX party mode for your own files and for audio playing in other music apps.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#05070f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eaf0fb" media="(prefers-color-scheme: light)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VOID-20">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
+@font-face{font-family:'Orbitron';font-style:normal;font-weight:500 700;font-display:swap;src:url(fonts/orbitron-latin.woff2) format('woff2')}
 :root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
 --bg:#05070f;--panel:#0d1224;--ink:#e6f1ff;--mute:#7c8bb0;--line:#1c2748;--a:#22e6ff;--b:#a96bff;--bass:#ff3d7f}
 @media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#eaf0fb;--panel:#fff;--ink:#0b1633;--mute:#5a6890;--line:#cfd9ef;--a:#0090c8;--b:#6a33d6;--bass:#d6195c}}
@@ -114,6 +127,14 @@ html.apexdrop main{animation:axshkA .1s linear infinite}
 <p class="sub">20-band equalizer, custom bands and ultra deep bass</p>
 
 <div class="row" style="margin:0 0 12px"><button id="apexgo" class="pri" type="button">APEX</button><span class="note" id="apexgos" style="margin:0">Party box mode</span></div>
+
+<section id="srca">
+<h2>OTHER APPS</h2>
+<div class="row"><button id="capgo" class="pri" type="button">Capture audio from another app</button><button id="capstop" type="button" hidden>Stop capture</button><button id="instapp" type="button" hidden>Install VOID-20</button></div>
+<div class="lab"><span>EQ input</span><b id="capsrc">This app&apos;s player</b></div>
+<p class="note" id="capmsg">Nothing captured yet.</p>
+<p class="note">Shapes whatever another app is playing through this whole chain: EQ, speaker guard and limiter. In Chrome or Edge on desktop pick a tab or window and tick <b>Share tab audio</b>. That covers Spotify, YouTube Music, SoundCloud, Tidal and any other web player. Phones and Safari do not let a website capture other apps, so there use <b>Load audio</b>, drag a file in, or let the installed app open audio sent to it from somewhere else.</p>
+</section>
 
 <section id="guard">
 <h2>SPEAKER GUARD</h2>
@@ -387,9 +408,11 @@ function fmt(s){if(!isFinite(s))return"0:00";s=Math.floor(s);return Math.floor(s
 const A={on:false,slam:false,lock:false,punch:0,loud:0};
 function chain(){
 const list=S.byp?[]:[nodes.ultra,nodes.bass,...bandN,...(S.fine.some(v=>v)?fineN:[]),...S.custom.map(c=>c.node)];
+const src=inputNode();
 try{nodes.src.disconnect()}catch(e){}
+try{nodes.ext&&nodes.ext.disconnect()}catch(e){}
 list.forEach(n=>{try{n.disconnect()}catch(e){}});
-let prev=nodes.src;list.forEach(n=>{prev.connect(n);prev=n});prev.connect(nodes.pre);nodes.src.connect(nodes.anIn);
+let prev=src;list.forEach(n=>{prev.connect(n);prev=n});prev.connect(nodes.pre);src.connect(nodes.anIn);
 curveCalc()}
 
 function curveCalc(){
@@ -1275,5 +1298,86 @@ $("axresetall").onclick=()=>{
  applyAll();
  $("msg").textContent="APEX reset: all bands flat.";
 };
+// ===== Other apps: eq the audio another app is playing, and take files handed over by the system =====
+const CAP={on:false,name:"",stream:null};
+function inputNode(){return (window.__voidExtOn&&nodes.ext)?nodes.ext:nodes.src}
+function capSetBtn(){const on=!!window.__voidExtOn;$("capgo").hidden=on;$("capstop").hidden=!on;
+ $("capsrc").textContent=on?(CAP.name||"Other app"):"This app's player"}
+async function capStart(){
+ const M=$("capmsg"),md=navigator.mediaDevices;
+ if(!md||!md.getDisplayMedia){M.textContent="This browser cannot capture audio from other apps. Chrome or Edge on desktop can, or load an audio file instead.";return}
+ try{
+  if(!ctx)boot();
+  const stream=await md.getDisplayMedia({video:{frameRate:1},audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:2},systemAudio:"include",selfBrowserSurface:"exclude"});
+  const at=stream.getAudioTracks();
+  if(!at.length){stream.getTracks().forEach(t=>t.stop());M.textContent='That share had no sound. Try again and tick "Share tab audio" in the picker.';return}
+  capStop(true);
+  CAP.name=at[0].label||"Other app";
+  CAP.stream=stream;
+  nodes.ext=ctx.createMediaStreamSource(stream);
+  window.__voidExtOn=true;CAP.on=true;
+  try{au.pause()}catch(e){}
+  chain();
+  if(ctx.state!=="running")ctx.resume().catch(()=>{});
+  at[0].addEventListener("ended",()=>capStop());
+  capSetBtn();
+  M.textContent='Captured "'+CAP.name+'". Every control on this page now shapes that sound.';
+  $("nm").textContent="External audio: "+CAP.name;
+ }catch(e){
+  M.textContent=(e&&e.name==="NotAllowedError")?"Capture was cancelled.":"Could not capture that audio: "+((e&&e.message)||e);
+ }
+}
+function capStop(quiet){
+ if(CAP.stream){try{CAP.stream.getTracks().forEach(t=>t.stop())}catch(e){}CAP.stream=null}
+ if(nodes.ext){try{nodes.ext.disconnect()}catch(e){}nodes.ext=null}
+ window.__voidExtOn=false;CAP.on=false;
+ try{chain()}catch(e){}
+ capSetBtn();
+ if(!quiet){$("capmsg").textContent="Capture stopped. Back to this app's own player.";$("nm").textContent="No audio loaded."}
+}
+$("capgo").onclick=capStart;
+$("capstop").onclick=()=>capStop(false);
+
+// Files handed over by other apps ("Open with", share sheet) or dropped onto the page
+function openAudioFiles(files){
+ const list=[...files].filter(Boolean);
+ if(!list.length)return false;
+ if(window.__voidExtOn)capStop(true);
+ $("pls").hidden=false;
+ plAdd(list,true);
+ $("capmsg").textContent="Playing "+list.length+" file"+(list.length===1?"":"s")+" from another app.";
+ return true;
+}
+if("launchQueue" in window&&"LaunchParams" in window){
+ try{launchQueue.setConsumer(async p=>{
+  if(!p.files||!p.files.length)return;
+  const out=[];
+  for(const h of p.files){try{out.push(await h.getFile())}catch(e){}}
+  openAudioFiles(out);
+ })}catch(e){}
+}
+addEventListener("dragover",e=>{const dt=e.dataTransfer;if(dt&&[...dt.types].includes("Files")){e.preventDefault();dt.dropEffect="copy"}});
+addEventListener("drop",e=>{const dt=e.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;
+ const files=[...dt.files];
+ if(!files.some(f=>/^audio\//.test(f.type||"")||/\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba|aiff?)$/i.test(f.name||"")))return;
+ e.preventDefault();openAudioFiles(files)});
+
+// Install as an app
+let deferredInstall=null,standalone=false;
+try{standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone===true}catch(e){}
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;$("instapp").hidden=false});
+addEventListener("appinstalled",()=>{deferredInstall=null;$("instapp").hidden=true;$("capmsg").textContent="VOID-20 is installed. It opens full screen and works offline."});
+if(!standalone)$("instapp").hidden=false;
+$("instapp").onclick=async()=>{
+ if(!deferredInstall){$("capmsg").textContent='Use your browser menu and choose "Install app" or "Add to Home Screen".';return}
+ try{deferredInstall.prompt();const r=await deferredInstall.userChoice;if(r&&r.outcome==="accepted")$("capmsg").textContent="Installing VOID-20...";}catch(e){}
+ deferredInstall=null;$("instapp").hidden=true;
+};
+capSetBtn();
+
+// Offline support
+if("serviceWorker" in navigator&&location.protocol!=="file:"){
+ addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{})});
+}
 </script>
 </body></html>
